@@ -55,6 +55,12 @@
             justify-content: space-between;
         }
 
+        .pagination {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
         .rarity.Common { background: gray; }
         .rarity.Rare { background: blue; }
         .rarity.Epic { background: purple; }
@@ -65,9 +71,6 @@
             border-radius: 5px;
             font-size: 12px;
         }
-
-        .positive { color: #22c55e; }
-        .negative { color: #ef4444; }
 
         canvas {
             margin-top: 20px;
@@ -104,21 +107,36 @@
 <!-- TRADES -->
 <div id="tradeList">
 {% for t in trades %}
-<div class="trade">
-    <strong>{{ t.item }}</strong><br>
-    Qty: {{ t.quantity }} | Seeds: {{ t.seeds }}<br>
+<div class="trade"
+     data-item="{{ t.item }}"
+     data-profit="{{ t.profit }}"
+     data-index="{{ loop.index0 }}">
 
-    Avg: {{ t.avg_price }}
-
-    <div style="color:{{ 'green' if t.profit>=0 else 'red' }}">
-        Profit: {{ t.profit }}
+    <div>
+        <strong>{{ t.item }}</strong><br>
+        Qty: {{ t.quantity }} | Seeds: {{ t.seeds }}<br>
+        Avg: {{ t.avg_price }}
     </div>
 
-    {% if t.bad_trade %}
-    <div style="color:red;">⚠ Bad Trade</div>
-    {% endif %}
+    <div style="text-align:right;">
+        <div style="color:{{ 'green' if t.profit>=0 else 'red' }}">
+            Profit: {{ t.profit }}
+        </div>
+
+        {% if t.bad_trade %}
+        <div style="color:red;">⚠ Bad Trade</div>
+        {% endif %}
+    </div>
+
 </div>
 {% endfor %}
+</div>
+
+<!-- PAGINATION -->
+<div class="pagination">
+    <button onclick="prevPage()">⬅ Prev</button>
+    <span id="pageInfo"></span>
+    <button onclick="nextPage()">Next ➡</button>
 </div>
 
 <!-- CHART -->
@@ -128,17 +146,58 @@
 const trades = {{ trades | tojson }};
 
 // ==============================
+// PAGINATION SETUP
+// ==============================
+let currentPage = 1;
+const perPage = 10;
+
+function renderPage() {
+    const list = document.getElementById("tradeList");
+    const items = Array.from(list.children);
+
+    items.forEach((item, index) => {
+        const start = (currentPage - 1) * perPage;
+        const end = start + perPage;
+
+        item.style.display = (index >= start && index < end) ? "flex" : "none";
+    });
+
+    document.getElementById("pageInfo").innerText =
+        `Page ${currentPage} / ${Math.ceil(items.length / perPage)}`;
+}
+
+function nextPage() {
+    const total = document.getElementById("tradeList").children.length;
+    if (currentPage * perPage < total) {
+        currentPage++;
+        renderPage();
+    }
+}
+
+function prevPage() {
+    if (currentPage > 1) {
+        currentPage--;
+        renderPage();
+    }
+}
+
+// Initial render
+renderPage();
+
+// ==============================
 // SEARCH
 // ==============================
 document.getElementById("search").addEventListener("input", function() {
     const q = this.value.toLowerCase();
+
     document.querySelectorAll(".trade").forEach(t => {
-        t.style.display = t.dataset.item.toLowerCase().includes(q) ? "flex" : "none";
+        const item = t.dataset.item.toLowerCase();
+        t.style.display = item.includes(q) ? "flex" : "none";
     });
 });
 
 // ==============================
-// SORT
+// SORT (FIXED)
 // ==============================
 document.getElementById("sort").addEventListener("change", function() {
     const type = this.value;
@@ -148,13 +207,21 @@ document.getElementById("sort").addEventListener("change", function() {
     items.sort((a, b) => {
         const pa = parseFloat(a.dataset.profit);
         const pb = parseFloat(b.dataset.profit);
+        const ia = parseInt(a.dataset.index);
+        const ib = parseInt(b.dataset.index);
 
         if (type === "profit") return pb - pa;
         if (type === "loss") return pa - pb;
-        return 0;
+
+        // NEWEST = reverse original order
+        if (type === "newest") return ib - ia;
     });
 
     items.forEach(i => list.appendChild(i));
+
+    // Reset pagination after sort
+    currentPage = 1;
+    renderPage();
 });
 
 // ==============================

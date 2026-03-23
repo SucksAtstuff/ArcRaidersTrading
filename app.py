@@ -138,10 +138,29 @@ def should_sell(item):
 
 
 def calculate_stats(trades):
+    # Dictionary to count how many times each item appears
+    item_counts = {}
+
+    for t in trades:
+        item = t["item"]
+
+        # Initialize count if item not seen before
+        if item not in item_counts:
+            item_counts[item] = 0
+
+        # Increment count
+        item_counts[item] += t.get("quantity", 1)
+
+    # Find the item with the highest count
+    if item_counts:
+        most_traded = max(item_counts, key=item_counts.get)
+    else:
+        most_traded = "N/A"
+
     return {
         "total_seeds": sum(t["seeds"] for t in trades),
         "total_profit": sum(t.get("profit", 0) for t in trades),
-        "most_traded": max([t["item"] for t in trades], default="N/A")
+        "most_traded": most_traded
     }
 
 
