@@ -24,6 +24,7 @@ CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 hours
 # -----------------------------------------------------------------------------
 _ITEM_CACHE = None           # full list
 _ITEM_LOOKUP = {}            # name -> item dict
+_SEARCH_CACHE = {}
 
 
 # -----------------------------------------------------------------------------
@@ -174,3 +175,33 @@ def find_item(name: str):
     normalized_name = name.strip().lower()
 
     return _ITEM_LOOKUP.get(normalized_name)
+
+def search_item_names(query: str, limit: int = 10):
+    global _ITEM_CACHE, _SEARCH_CACHE
+
+    if not query:
+        return []
+
+    normalized_query = query.strip().lower()
+
+    # 🔥 cache hit
+    if normalized_query in _SEARCH_CACHE:
+        return _SEARCH_CACHE[normalized_query]
+
+    if _ITEM_CACHE is None:
+        get_item_cache()
+
+    results = []
+
+    for item in _ITEM_CACHE:
+        name = (item.get("name") or "").strip()
+
+        if normalized_query in name.lower():
+            results.append({"name": name})
+
+        if len(results) >= limit:
+            break
+
+    _SEARCH_CACHE[normalized_query] = results
+
+    return results
