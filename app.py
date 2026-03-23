@@ -233,17 +233,20 @@ def edit_trade(trade_id: str):
     trade = get_trade_by_id(trade_id)
 
     if trade is None:
-        print("EDIT FAILED: ID NOT FOUND:", trade_id)  # 🔥 DEBUG
+        print("EDIT FAILED: ID NOT FOUND:", trade_id)
         return "Trade not found.", 404
 
     if request.method == "POST":
-        print("EDIT FORM:", request.form)  # 🔥 DEBUG
+        print("EDIT FORM:", request.form)
 
         item_name = (request.form.get("item") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
         price_raw = (request.form.get("price") or "").strip()
         avg_price_raw = (request.form.get("avg_price") or "").strip()
         seeds_raw = (request.form.get("seeds") or "").strip()
+
+        # 🔥 NEW: trade type
+        trade_type = (request.form.get("trade_type") or "sell").strip().lower()
 
         try:
             quantity = int(quantity_raw)
@@ -252,6 +255,27 @@ def edit_trade(trade_id: str):
             seeds = int(seeds_raw)
         except ValueError:
             return "Invalid numbers", 400
+
+        if quantity <= 0:
+            return "Quantity must be > 0", 400
+
+        if seeds < 0:
+            return "Seeds must be positive in form", 400
+
+        if trade_type not in {"buy", "sell"}:
+            return "Invalid trade type", 400
+
+        # ---------------------------------------------------------------------
+        # 🔥 CRITICAL FIX (same as add_trade)
+        # ---------------------------------------------------------------------
+        if trade_type == "buy":
+            quantity = abs(quantity)      # gain item
+            seeds = -abs(seeds)          # lose seeds
+
+        else:  # sell
+            quantity = -abs(quantity)    # lose item
+            seeds = abs(seeds)           # gain seeds
+        # ---------------------------------------------------------------------
 
         item_data = find_item(item_name)
 

@@ -44,7 +44,8 @@
             font-size: 14px;
         }
 
-        input {
+        input,
+        select {
             width: 100%;
             box-sizing: border-box;
             padding: 10px;
@@ -105,42 +106,67 @@
     <div class="card">
         <h1>Edit Trade</h1>
 
-    <div class="field">
-        <label for="trade_type">Trade Type</label>
-        <select id="trade_type" name="trade_type">
-            <!-- If quantity > 0 → BUY -->
-            <option value="buy" {{ "selected" if trade.quantity > 0 else "" }}>Buy</option>
-
-            <!-- If quantity < 0 → SELL -->
-            <option value="sell" {{ "selected" if trade.quantity < 0 else "" }}>Sell</option>
-        </select>
-    </div>
-
         <form method="post">
+
+            <!-- 🔥 NEW: BUY / SELL DROPDOWN -->
+            <!--
+                Determines how backend interprets values:
+                BUY  = +quantity, -seeds
+                SELL = -quantity, +seeds
+
+                We infer current type from stored quantity:
+                >0 → BUY
+                <0 → SELL
+            -->
+            <div class="field">
+                <label for="trade_type">Trade Type</label>
+                <select id="trade_type" name="trade_type">
+                    <option value="buy" {{ "selected" if trade.quantity > 0 else "" }}>Buy</option>
+                    <option value="sell" {{ "selected" if trade.quantity < 0 else "" }}>Sell</option>
+                </select>
+            </div>
+
             <div class="field">
                 <label for="item">Item</label>
-                <input id="item" name="iem" type="text" value="{{ trade.item }}" autocomplete="off" required>
+                <input id="item" name="item" type="text" value="{{ trade.item }}" autocomplete="off" required>
                 <div id="suggestions"></div>
             </div>
 
             <div class="field">
                 <label for="quantity">Quantity</label>
-                <input id="quantity" name="quantity" type="number" min="1" step="1" value="{{ trade.quantity }}" required>
+
+                <!--
+                    IMPORTANT:
+                    We show ABS value so user never sees negative numbers
+                    Backend will re-apply sign
+                -->
+                <input id="quantity" name="quantity" type="number" min="1" step="1"
+                       value="{{ trade.quantity | abs }}" required>
             </div>
 
             <div class="field">
                 <label for="price">Your Price</label>
-                <input id="price" name="price" type="number" min="0" step="0.01" value="{{ trade.price }}" required>
+                <input id="price" name="price" type="number" min="0" step="0.01"
+                       value="{{ trade.price }}" required>
             </div>
 
             <div class="field">
                 <label for="avg_price">Avg 24h Price</label>
-                <input id="avg_price" name="avg_price" type="number" min="0" step="0.01" value="{{ trade.avg_price }}" required>
+                <input id="avg_price" name="avg_price" type="number" min="0" step="0.01"
+                       value="{{ trade.avg_price }}" required>
             </div>
 
+            <!-- 🔥 FIXED LABEL -->
             <div class="field">
-                <label for="seeds">Seeds Received</label>
-                <input id="seeds" name="seeds" type="number" step="1" value="{{ trade.seeds }}" required>
+                <label for="seeds">Seeds</label>
+
+                <!--
+                    Always show positive number to user
+                    Backend decides +/- based on trade type
+                -->
+                <input id="seeds" name="seeds" type="number" step="1"
+                       value="{{ trade.seeds | abs }}" required>
+
                 <div id="warning"></div>
             </div>
 
@@ -158,6 +184,8 @@
     const seedsInput = document.getElementById("seeds");
     const warningBox = document.getElementById("warning");
 
+    const tradeTypeInput = document.getElementById("trade_type");
+
     let autocompleteAbortController = null;
 
     async function fetchSuggestions(query) {
@@ -171,10 +199,7 @@
             signal: autocompleteAbortController.signal
         });
 
-        if (!response.ok) {
-            return [];
-        }
-
+        if (!response.ok) return [];
         return await response.json();
     }
 
@@ -224,24 +249,25 @@
     });
 
     function updateBadTradeWarning() {
-    const quantity = Math.abs(Number(quantityInput.value || 0));
-    const avgPrice = Number(avgPriceInput.value || 0);
-    const seeds = Number(seedsInput.value || 0);
-    const tradeType = document.getElementById("trade_type").value;
+        const quantity = Math.abs(Number(quantityInput.value || 0));
+        const avgPrice = Number(avgPriceInput.value || 0);
+        const seeds = Number(seedsInput.value || 0);
+        const tradeType = tradeTypeInput.value;
 
-    const expected = avgPrice * quantity;
+        const expected = avgPrice * quantity;
 
-    // Only warn for SELL trades
-    if (tradeType === "sell" && quantity > 0 && avgPrice > 0 && seeds < expected * 0.5) {
-        warningBox.textContent = "⚠ BAD TRADE";
-    } else {
-        warningBox.textContent = "";
+        // 🔥 Only warn for SELL trades
+        if (tradeType === "sell" && quantity > 0 && avgPrice > 0 && seeds < expected * 0.5) {
+            warningBox.textContent = "⚠ BAD TRADE";
+        } else {
+            warningBox.textContent = "";
+        }
     }
-}
 
     quantityInput.addEventListener("input", updateBadTradeWarning);
     avgPriceInput.addEventListener("input", updateBadTradeWarning);
     seedsInput.addEventListener("input", updateBadTradeWarning);
+    tradeTypeInput.addEventListener("change", updateBadTradeWarning);
 
     updateBadTradeWarning();
 </script>
