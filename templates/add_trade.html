@@ -52,7 +52,8 @@
             font-size: 14px;
         }
 
-        input {
+        input,
+        select {
             width: 100%;
             box-sizing: border-box;
             padding: 10px;
@@ -120,6 +121,27 @@
         <h1>Add Trade</h1>
 
         <form method="post">
+            <!--
+                NEW FIELD:
+                This dropdown lets the user explicitly choose whether the trade
+                is a BUY or a SELL.
+
+                Why this matters:
+                - BUY  = user gains the item, loses seeds
+                - SELL = user loses the item, gains seeds
+
+                The backend uses this value to automatically flip the signs for
+                quantity and seeds so the rest of the app can keep using a single,
+                consistent trade model.
+            -->
+            <div class="field">
+                <label for="trade_type">Trade Type</label>
+                <select id="trade_type" name="trade_type" required>
+                    <option value="buy">Buy (Spend Seeds)</option>
+                    <option value="sell">Sell (Gain Seeds)</option>
+                </select>
+            </div>
+
             <div class="field">
                 <label for="item">Item</label>
                 <input id="item" name="item" type="text" placeholder="Start typing an item name..." autocomplete="off" required>
@@ -141,8 +163,16 @@
                 <input id="avg_price" name="avg_price" type="number" min="0" step="0.01" required>
             </div>
 
+            <!--
+                Label changed from "Seeds Received" to just "Seeds" because:
+                - on SELL you receive seeds
+                - on BUY you spend seeds
+
+                The number the user types stays positive in the form.
+                The backend decides whether it becomes positive or negative.
+            -->
             <div class="field">
-                <label for="seeds">Seeds Received</label>
+                <label for="seeds">Seeds</label>
                 <input id="seeds" name="seeds" type="number" step="1" required>
                 <div id="warning"></div>
                 <div class="helper">
@@ -167,6 +197,25 @@
     const avgPriceInput = document.getElementById("avg_price");
     const seedsInput = document.getElementById("seeds");
     const warningBox = document.getElementById("warning");
+
+    /*
+        NEW:
+        We read the trade type so the warning logic can behave differently
+        for buys vs sells.
+
+        Existing warning rule in your project:
+        - warn when the trade is below 50% of expected avg value
+
+        But that only really makes sense for SELLS, because "bad trade"
+        currently means you got too few seeds back.
+
+        For BUYS:
+        - you are spending seeds, not receiving them
+        - the old warning logic would incorrectly flag almost every buy
+
+        So below, the warning is only shown for SELL trades.
+    */
+    const tradeTypeInput = document.getElementById("trade_type");
 
     let autocompleteAbortController = null;
 
@@ -214,26 +263,26 @@
     let debounceTimeout = null;
 
     itemInput.addEventListener("input", () => {
-    clearTimeout(debounceTimeout);
+        clearTimeout(debounceTimeout);
 
-    debounceTimeout = setTimeout(async () => {
-        const query = itemInput.value.trim();
+        debounceTimeout = setTimeout(async () => {
+            const query = itemInput.value.trim();
 
-        if (!query) {
-            clearSuggestions();
-            return;
-        }
-
-        try {
-            const items = await fetchSuggestions(query);
-            renderSuggestions(items);
-        } catch (error) {
-            if (error.name !== "AbortError") {
+            if (!query) {
                 clearSuggestions();
+                return;
             }
-        }
-    }, 200); // 200ms debounce
-});
+
+            try {
+                const items = await fetchSuggestions(query);
+                renderSuggestions(items);
+            } catch (error) {
+                if (error.name !== "AbortError") {
+                    clearSuggestions();
+                }
+            }
+        }, 200);
+    });
 
     document.addEventListener("click", (event) => {
         if (event.target !== itemInput && !suggestionsBox.contains(event.target)) {
@@ -245,10 +294,26 @@
         const quantity = Number(quantityInput.value || 0);
         const avgPrice = Number(avgPriceInput.value || 0);
         const seeds = Number(seedsInput.value || 0);
+        const tradeType = tradeTypeInput.value;
 
         const expected = avgPrice * quantity;
 
-        if (quantity > 0 && avgPrice > 0 && seeds < expected * 0.5) {
+        /*
+            IMPORTANT:
+            Only show the "bad trade" warning for SELL trades.
+
+            Reason:
+            - SELL: seeds entered = seeds you receive, so comparing received
+              seeds against expected value makes sense.
+            - BUY: seeds entered = seeds you spend, so the old comparison would
+              be backwards and misleading.
+        */
+        if (
+            tradeType === "sell" &&
+            quantity > 0 &&
+            avgPrice > 0 &&
+            seeds < expected * 0.5
+        ) {
             warningBox.textContent = "⚠ BAD TRADE";
         } else {
             warningBox.textContent = "";
@@ -258,6 +323,7 @@
     quantityInput.addEventListener("input", updateBadTradeWarning);
     avgPriceInput.addEventListener("input", updateBadTradeWarning);
     seedsInput.addEventListener("input", updateBadTradeWarning);
+    tradeTypeInput.addEventListener("change", updateBadTradeWarning);
 </script>
 </body>
 </html>

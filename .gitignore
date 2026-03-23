@@ -32,8 +32,8 @@ instance/
 # =========================
 # JSON / local data (your files)
 # =========================
-trades.json
-items_cache.json
+/trades.db
+/items_cache.json
 
 # =========================
 # OS files

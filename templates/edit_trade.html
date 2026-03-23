@@ -105,10 +105,21 @@
     <div class="card">
         <h1>Edit Trade</h1>
 
+    <div class="field">
+        <label for="trade_type">Trade Type</label>
+        <select id="trade_type" name="trade_type">
+            <!-- If quantity > 0 → BUY -->
+            <option value="buy" {{ "selected" if trade.quantity > 0 else "" }}>Buy</option>
+
+            <!-- If quantity < 0 → SELL -->
+            <option value="sell" {{ "selected" if trade.quantity < 0 else "" }}>Sell</option>
+        </select>
+    </div>
+
         <form method="post">
             <div class="field">
                 <label for="item">Item</label>
-                <input id="item" name="item" type="text" value="{{ trade.item }}" autocomplete="off" required>
+                <input id="item" name="iem" type="text" value="{{ trade.item }}" autocomplete="off" required>
                 <div id="suggestions"></div>
             </div>
 
@@ -213,18 +224,20 @@
     });
 
     function updateBadTradeWarning() {
-        const quantity = Number(quantityInput.value || 0);
-        const avgPrice = Number(avgPriceInput.value || 0);
-        const seeds = Number(seedsInput.value || 0);
+    const quantity = Math.abs(Number(quantityInput.value || 0));
+    const avgPrice = Number(avgPriceInput.value || 0);
+    const seeds = Number(seedsInput.value || 0);
+    const tradeType = document.getElementById("trade_type").value;
 
-        const expected = avgPrice * quantity;
+    const expected = avgPrice * quantity;
 
-        if (quantity > 0 && avgPrice > 0 && seeds < expected * 0.5) {
-            warningBox.textContent = "⚠ BAD TRADE";
-        } else {
-            warningBox.textContent = "";
-        }
+    // Only warn for SELL trades
+    if (tradeType === "sell" && quantity > 0 && avgPrice > 0 && seeds < expected * 0.5) {
+        warningBox.textContent = "⚠ BAD TRADE";
+    } else {
+        warningBox.textContent = "";
     }
+}
 
     quantityInput.addEventListener("input", updateBadTradeWarning);
     avgPriceInput.addEventListener("input", updateBadTradeWarning);

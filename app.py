@@ -5,6 +5,11 @@ Fixes included:
 - Debug logging for add/edit issues
 - Safer error handling
 - Removed unused uuid import (belongs in services layer)
+
+Buy/sell enhancement added:
+- Add trade form now supports trade_type
+- BUY  => +item quantity, -seeds
+- SELL => -item quantity, +seeds
 """
 
 from __future__ import annotations
@@ -24,7 +29,10 @@ from services.trades import (
     update_trade_by_id,
 )
 
+from services.trades import init_db
+
 app = Flask(__name__)
+init_db()
 
 
 # =============================================================================
@@ -140,6 +148,19 @@ def add_trade():
         avg_price_raw = (request.form.get("avg_price") or "").strip()
         seeds_raw = (request.form.get("seeds") or "").strip()
 
+        # ---------------------------------------------------------------------
+        # NEW:
+        # Read the trade type from the form.
+        #
+        # Expected values:
+        # - "buy"
+        # - "sell"
+        #
+        # Defaulting to "sell" preserves safer backwards behavior in case
+        # the field is somehow missing.
+        # ---------------------------------------------------------------------
+        trade_type = (request.form.get("trade_type") or "sell").strip().lower()
+
         if not item_name:
             return "Item name is required.", 400
 
@@ -153,6 +174,35 @@ def add_trade():
 
         if quantity <= 0:
             return "Quantity must be > 0", 400
+
+        if seeds < 0:
+            return "Seeds must be entered as a positive number in the form.", 400
+
+        if trade_type not in {"buy", "sell"}:
+            return "Invalid trade type.", 400
+
+        # ---------------------------------------------------------------------
+        # CORE BUY/SELL LOGIC
+        #
+        # We store direction using signs:
+        #
+        # BUY:
+        #   quantity = positive  (you gained the item)
+        #   seeds    = negative  (you spent seeds)
+        #
+        # SELL:
+        #   quantity = negative  (you lost the item)
+        #   seeds    = positive  (you gained seeds)
+        #
+        # This keeps your storage model compact and lets the rest of the app
+        # continue using one trade record format.
+        # ---------------------------------------------------------------------
+        if trade_type == "buy":
+            quantity = abs(quantity)
+            seeds = -abs(seeds)
+        else:  # sell
+            quantity = -abs(quantity)
+            seeds = abs(seeds)
 
         item_data = find_item(item_name)
 

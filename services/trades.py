@@ -1,67 +1,52 @@
-"""
-Trade storage and mutation logic.
-
-Responsibilities:
-- Load and save trades from JSON
-- Add trade records
-- Update trade records
-- Delete trade records
-- Lookup trades by unique id
-
-This module keeps persistence concerns away from route handlers.
-"""
-
-from __future__ import annotations
-
-import json
-import os
+import sqlite3
 import uuid
 from typing import Any
 
 from services.stats import calculate_profit, detect_bad_trade, should_sell
 
-TRADES_FILE = "trades.json"
+DB_FILE = "trades.db"
 
 
-def _atomic_write_json(path: str, data: Any) -> None:
-    """
-    Safely write JSON to disk using a temporary file and atomic replace.
-    """
-    temp_path = f"{path}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as file_handle:
-        json.dump(data, file_handle, indent=4)
-        file_handle.flush()
-        os.fsync(file_handle.fileno())
-
-    os.replace(temp_path, path)
+# -----------------------------------------------------------------------------
+# DB CONNECTION
+# -----------------------------------------------------------------------------
+def get_connection():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # return dict-like rows
+    return conn
 
 
-def load_trades() -> list[dict[str, Any]]:
-    """
-    Load trades from disk.
+# -----------------------------------------------------------------------------
+# INIT DATABASE (AUTO CREATE TABLE)
+# -----------------------------------------------------------------------------
+def init_db():
+    conn = get_connection()
+    cursor = conn.cursor()
 
-    Returns:
-    - empty list if file is missing
-    - empty list if file is invalid JSON
-    """
-    if not os.path.exists(TRADES_FILE):
-        return []
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS trades (
+        id TEXT PRIMARY KEY,
+        item TEXT,
+        quantity INTEGER,
+        price REAL,
+        avg_price REAL,
+        seeds INTEGER,
+        timestamp TEXT,
+        rarity TEXT,
+        value REAL,
+        recommendation TEXT,
+        bad_trade INTEGER,
+        profit REAL
+    )
+    """)
 
-    try:
-        with open(TRADES_FILE, "r", encoding="utf-8") as file_handle:
-            data = json.load(file_handle)
-        return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
-        return []
+    conn.commit()
+    conn.close()
 
 
-def save_trades(trades: list[dict[str, Any]]) -> None:
-    """
-    Persist all trades safely.
-    """
-    _atomic_write_json(TRADES_FILE, trades)
-
-
+# -----------------------------------------------------------------------------
+# BUILD TRADE RECORD (UNCHANGED LOGIC)
+# -----------------------------------------------------------------------------
 def _build_trade_record(
     *,
     item: str,
@@ -72,13 +57,7 @@ def _build_trade_record(
     timestamp: str,
     item_data: dict[str, Any] | None,
     trade_id: str | None = None,
-) -> dict[str, Any]:
-    """
-    Build one normalized trade record.
-
-    This centralizes how trade objects are created so add/edit behavior stays
-    consistent.
-    """
+):
     trade = {
         "id": trade_id or uuid.uuid4().hex,
         "item": item,
@@ -92,12 +71,30 @@ def _build_trade_record(
         "recommendation": should_sell(item_data),
     }
 
-    trade["bad_trade"] = detect_bad_trade(trade)
+    trade["bad_trade"] = int(detect_bad_trade(trade))
     trade["profit"] = calculate_profit(trade)
 
     return trade
 
 
+# -----------------------------------------------------------------------------
+# LOAD ALL TRADES
+# -----------------------------------------------------------------------------
+def load_trades():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM trades")
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+# -----------------------------------------------------------------------------
+# ADD TRADE
+# -----------------------------------------------------------------------------
 def add_trade_record(
     *,
     item: str,
@@ -107,11 +104,9 @@ def add_trade_record(
     seeds: int,
     timestamp: str,
     item_data: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """
-    Add a new trade to storage and return it.
-    """
-    trades = load_trades()
+):
+    conn = get_connection()
+    cursor = conn.cursor()
 
     trade = _build_trade_record(
         item=item,
@@ -123,21 +118,47 @@ def add_trade_record(
         item_data=item_data,
     )
 
-    trades.append(trade)
-    save_trades(trades)
+    cursor.execute("""
+        INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        trade["id"],
+        trade["item"],
+        trade["quantity"],
+        trade["price"],
+        trade["avg_price"],
+        trade["seeds"],
+        trade["timestamp"],
+        trade["rarity"],
+        trade["value"],
+        trade["recommendation"],
+        trade["bad_trade"],
+        trade["profit"],
+    ))
+
+    conn.commit()
+    conn.close()
+
     return trade
 
 
-def get_trade_by_id(trade_id: str) -> dict[str, Any] | None:
-    """
-    Return one trade by id, or None if missing.
-    """
-    for trade in load_trades():
-        if trade.get("id") == trade_id:
-            return trade
-    return None
+# -----------------------------------------------------------------------------
+# GET TRADE
+# -----------------------------------------------------------------------------
+def get_trade_by_id(trade_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM trades WHERE id = ?", (trade_id,))
+    row = cursor.fetchone()
+
+    conn.close()
+
+    return dict(row) if row else None
 
 
+# -----------------------------------------------------------------------------
+# UPDATE TRADE
+# -----------------------------------------------------------------------------
 def update_trade_by_id(
     *,
     trade_id: str,
@@ -147,52 +168,65 @@ def update_trade_by_id(
     avg_price: float,
     seeds: int,
     item_data: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """
-    Update an existing trade by id.
+):
+    conn = get_connection()
+    cursor = conn.cursor()
 
-    Returns:
-    - updated trade if found
-    - None if missing
-    """
-    trades = load_trades()
+    trade = _build_trade_record(
+        trade_id=trade_id,
+        item=item,
+        quantity=quantity,
+        price=price,
+        avg_price=avg_price,
+        seeds=seeds,
+        timestamp="",  # keep old timestamp if needed later
+        item_data=item_data,
+    )
 
-    for index, existing_trade in enumerate(trades):
-        if existing_trade.get("id") != trade_id:
-            continue
+    cursor.execute("""
+        UPDATE trades SET
+            item = ?,
+            quantity = ?,
+            price = ?,
+            avg_price = ?,
+            seeds = ?,
+            rarity = ?,
+            value = ?,
+            recommendation = ?,
+            bad_trade = ?,
+            profit = ?
+        WHERE id = ?
+    """, (
+        trade["item"],
+        trade["quantity"],
+        trade["price"],
+        trade["avg_price"],
+        trade["seeds"],
+        trade["rarity"],
+        trade["value"],
+        trade["recommendation"],
+        trade["bad_trade"],
+        trade["profit"],
+        trade_id
+    ))
 
-        updated_trade = _build_trade_record(
-            trade_id=trade_id,
-            item=item,
-            quantity=quantity,
-            price=price,
-            avg_price=avg_price,
-            seeds=seeds,
-            timestamp=existing_trade.get("timestamp", ""),
-            item_data=item_data,
-        )
+    conn.commit()
+    conn.close()
 
-        trades[index] = updated_trade
-        save_trades(trades)
-        return updated_trade
-
-    return None
+    return trade
 
 
-def delete_trade_by_id(trade_id: str) -> bool:
-    """
-    Delete a trade by id.
+# -----------------------------------------------------------------------------
+# DELETE
+# -----------------------------------------------------------------------------
+def delete_trade_by_id(trade_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
 
-    Returns:
-    - True if deleted
-    - False if no trade matched
-    """
-    trades = load_trades()
-    original_count = len(trades)
+    cursor.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    conn.commit()
 
-    remaining_trades = [trade for trade in trades if trade.get("id") != trade_id]
-    if len(remaining_trades) == original_count:
-        return False
+    deleted = cursor.rowcount > 0
 
-    save_trades(remaining_trades)
-    return True
+    conn.close()
+    return deleted
