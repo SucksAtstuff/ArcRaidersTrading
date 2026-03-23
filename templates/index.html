@@ -1,245 +1,465 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trade Dashboard</title>
 
-    <!-- Chart.js -->
+    <!--
+        Chart.js is kept because your existing project already uses it,
+        but the charts are now driven by server-prepared data instead of
+        raw ad-hoc client logic.
+    -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
         body {
             background: #0f172a;
             color: #e2e8f0;
-            font-family: Arial;
-            padding: 20px;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 24px;
         }
 
-        .top-bar {
+        h1, h2 {
+            margin-top: 0;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .actions {
             display: flex;
-            gap: 10px;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .button {
+            background: #38bdf8;
+            color: #082f49;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .button.secondary {
+            background: #334155;
+            color: #e2e8f0;
+        }
+
+        .filters {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
             margin-bottom: 20px;
         }
 
-        input, select {
-            padding: 6px;
-            border-radius: 5px;
-            border: none;
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
         }
 
-        button {
-            padding: 8px;
-            background: #38bdf8;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
+        label {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+        }
+
+        input,
+        select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-top: 26px;
+        }
+
+        .checkbox-row input {
+            width: auto;
         }
 
         .stats {
-            display: flex;
-            gap: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
             margin-bottom: 20px;
         }
 
         .card {
             background: #1e293b;
-            padding: 15px;
-            border-radius: 10px;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .card strong {
+            display: block;
+            margin-bottom: 6px;
+            color: #94a3b8;
+            font-size: 13px;
+        }
+
+        .trade-list {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
         }
 
         .trade {
             background: #1e293b;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 10px;
+            border-radius: 12px;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .trade-title {
+            font-size: 18px;
+            margin-bottom: 6px;
+        }
+
+        .trade-meta {
+            color: #cbd5e1;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .trade-right {
+            text-align: right;
+            min-width: 160px;
+        }
+
+        .profit-positive {
+            color: #22c55e;
+            font-weight: bold;
+        }
+
+        .profit-negative {
+            color: #ef4444;
+            font-weight: bold;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            margin-top: 8px;
+            margin-left: 6px;
+        }
+
+        .badge-bad {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .badge-rec {
+            background: #1d4ed8;
+            color: #dbeafe;
+        }
+
+        .trade-actions {
             display: flex;
-            justify-content: space-between;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .inline-form {
+            margin: 0;
+        }
+
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
         }
 
         .pagination {
-            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .pagination-controls {
             display: flex;
             gap: 10px;
+            align-items: center;
         }
 
-        .rarity.Common { background: gray; }
-        .rarity.Rare { background: blue; }
-        .rarity.Epic { background: purple; }
-        .rarity.Legendary { background: gold; color: black; }
-
-        .rarity {
-            padding: 3px 8px;
-            border-radius: 5px;
-            font-size: 12px;
+        .muted {
+            color: #94a3b8;
+            font-size: 14px;
         }
 
-        canvas {
-            margin-top: 20px;
+        .empty-state {
             background: #1e293b;
-            padding: 10px;
-            border-radius: 10px;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            color: #cbd5e1;
+        }
+
+        @media (max-width: 720px) {
+            .trade {
+                grid-template-columns: 1fr;
+            }
+
+            .trade-right {
+                text-align: left;
+            }
+
+            .trade-actions {
+                justify-content: flex-start;
+            }
+
+            .pagination {
+                flex-direction: column;
+                align-items: flex-start;
+            }
         }
     </style>
 </head>
-
 <body>
+<div class="container">
+    <h1>📊 Trade Dashboard</h1>
 
-<h1>📊 Trade Dashboard</h1>
-
-<div class="top-bar">
-    <a href="/add"><button>Add Trade</button></a>
-
-    <input id="search" placeholder="Search item...">
-
-    <select id="sort">
-        <option value="newest">Newest</option>
-        <option value="profit">Best Profit</option>
-        <option value="loss">Worst Trades</option>
-    </select>
-</div>
-
-<!-- STATS -->
-<div class="stats">
-    <div class="card">Total Seeds: {{ stats.total_seeds }}</div>
-    <div class="card">Total Profit: {{ stats.total_profit }}</div>
-    <div class="card">Most Traded: {{ stats.most_traded }}</div>
-</div>
-
-<!-- TRADES -->
-<div id="tradeList">
-{% for t in trades %}
-<div class="trade"
-     data-item="{{ t.item }}"
-     data-profit="{{ t.profit }}"
-     data-index="{{ loop.index0 }}">
-
-    <div>
-        <strong>{{ t.item }}</strong><br>
-        Qty: {{ t.quantity }} | Seeds: {{ t.seeds }}<br>
-        Avg: {{ t.avg_price }}
+    <div class="actions">
+        <a href="{{ url_for('add_trade') }}">
+            <button class="button" type="button">Add Trade</button>
+        </a>
     </div>
 
-    <div style="text-align:right;">
-        <div style="color:{{ 'green' if t.profit>=0 else 'red' }}">
-            Profit: {{ t.profit }}
+    <form method="get" class="filters">
+        <div class="filter-grid">
+            <div>
+                <label for="q">Search item</label>
+                <input id="q" name="q" type="text" value="{{ search_query }}" placeholder="e.g. Osprey">
+            </div>
+
+            <div>
+                <label for="sort">Sort by</label>
+                <select id="sort" name="sort">
+                    <option value="newest" {{ "selected" if sort_by == "newest" else "" }}>Newest</option>
+                    <option value="profit_desc" {{ "selected" if sort_by == "profit_desc" else "" }}>Profit (highest first)</option>
+                    <option value="profit_asc" {{ "selected" if sort_by == "profit_asc" else "" }}>Profit (lowest first)</option>
+                    <option value="seeds_desc" {{ "selected" if sort_by == "seeds_desc" else "" }}>Seeds (highest first)</option>
+                    <option value="seeds_asc" {{ "selected" if sort_by == "seeds_asc" else "" }}>Seeds (lowest first)</option>
+                    <option value="item_asc" {{ "selected" if sort_by == "item_asc" else "" }}>Item (A-Z)</option>
+                    <option value="item_desc" {{ "selected" if sort_by == "item_desc" else "" }}>Item (Z-A)</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="min_profit">Min profit</label>
+                <input id="min_profit" name="min_profit" type="number" step="0.01" value="{{ min_profit }}" placeholder="No minimum">
+            </div>
+
+            <div>
+                <label for="max_profit">Max profit</label>
+                <input id="max_profit" name="max_profit" type="number" step="0.01" value="{{ max_profit }}" placeholder="No maximum">
+            </div>
+
+            <div class="checkbox-row">
+                <input id="bad_only" name="bad_only" type="checkbox" value="1" {{ "checked" if bad_only else "" }}>
+                <label for="bad_only" style="margin: 0;">Only bad trades</label>
+            </div>
         </div>
 
-        {% if t.bad_trade %}
-        <div style="color:red;">⚠ Bad Trade</div>
-        {% endif %}
+        <div class="actions" style="margin-top: 16px; margin-bottom: 0;">
+            <button class="button" type="submit">Apply Filters</button>
+            <a href="{{ url_for('index') }}">
+                <button class="button secondary" type="button">Reset</button>
+            </a>
+        </div>
+    </form>
+
+    <div class="stats">
+        <div class="card">
+            <strong>Total Seeds</strong>
+            {{ stats.total_seeds }}
+        </div>
+        <div class="card">
+            <strong>Total Profit</strong>
+            {{ stats.total_profit }}
+        </div>
+        <div class="card">
+            <strong>Most Traded</strong>
+            {{ stats.most_traded }}
+        </div>
+        <div class="card">
+            <strong>Bad Trades</strong>
+            {{ stats.bad_trade_count }}
+        </div>
+        <div class="card">
+            <strong>Filtered Trades</strong>
+            {{ stats.trade_count }}
+        </div>
     </div>
 
-</div>
-{% endfor %}
-</div>
+    <div class="charts">
+        <div class="chart-card">
+            <h2>Profit Over Time</h2>
+            <canvas id="profitChart"></canvas>
+        </div>
 
-<!-- PAGINATION -->
-<div class="pagination">
-    <button onclick="prevPage()">⬅ Prev</button>
-    <span id="pageInfo"></span>
-    <button onclick="nextPage()">Next ➡</button>
-</div>
+        <div class="chart-card">
+            <h2>Item Breakdown</h2>
+            <canvas id="itemBreakdownChart"></canvas>
+        </div>
+    </div>
 
-<!-- CHART -->
-<canvas id="profitChart"></canvas>
+    {% if trades %}
+        <div class="trade-list">
+            {% for trade in trades %}
+                <div class="trade">
+                    <div>
+                        <div class="trade-title">{{ trade.item }}</div>
+                        <div class="trade-meta">
+                            Qty: {{ trade.quantity }}<br>
+                            Seeds: {{ trade.seeds }}<br>
+                            Price: {{ trade.price }}<br>
+                            Avg 24h: {{ trade.avg_price }}<br>
+                            Timestamp: {{ trade.timestamp }}<br>
+                            Rarity: {{ trade.rarity or "Unknown" }}<br>
+                            Value: {{ trade.value if trade.value is not none else "Unknown" }}
+                        </div>
+                    </div>
+
+                    <div class="trade-right">
+                        <div class="{{ 'profit-positive' if trade.profit >= 0 else 'profit-negative' }}">
+                            Profit: {{ trade.profit }}
+                        </div>
+
+                        <span class="badge badge-rec">{{ trade.recommendation }}</span>
+
+                        {% if trade.bad_trade %}
+                            <span class="badge badge-bad">Bad Trade</span>
+                        {% endif %}
+
+                        <div class="trade-actions">
+                            <a href="{{ url_for('edit_trade', trade_id=trade.id) }}">
+                                <button class="button secondary" type="button">Edit</button>
+                            </a>
+
+                            <form class="inline-form" method="post" action="{{ url_for('delete_trade', trade_id=trade.id) }}">
+                                <button class="button secondary" type="submit" onclick="return confirm('Delete this trade?');">
+                                    Delete
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="pagination">
+            <div class="muted">
+                Showing page {{ current_page }} of {{ total_pages }} — {{ total_items }} result(s)
+            </div>
+
+            <div class="pagination-controls">
+                {% if current_page > 1 %}
+                    <a href="{{ url_for('index', q=search_query, sort=sort_by, bad_only='1' if bad_only else '', min_profit=min_profit, max_profit=max_profit, page=current_page - 1) }}">
+                        <button class="button secondary" type="button">⬅ Prev</button>
+                    </a>
+                {% else %}
+                    <button class="button secondary" type="button" disabled>⬅ Prev</button>
+                {% endif %}
+
+                {% if current_page < total_pages %}
+                    <a href="{{ url_for('index', q=search_query, sort=sort_by, bad_only='1' if bad_only else '', min_profit=min_profit, max_profit=max_profit, page=current_page + 1) }}">
+                        <button class="button secondary" type="button">Next ➡</button>
+                    </a>
+                {% else %}
+                    <button class="button secondary" type="button" disabled>Next ➡</button>
+                {% endif %}
+            </div>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            No trades matched your current filters.
+        </div>
+    {% endif %}
+</div>
 
 <script>
-const trades = {{ trades | tojson }};
+    /*
+        Chart data is prepared server-side.
+        That means the frontend only needs to render it, not calculate it.
+    */
+    const chartData = {{ chart_data | tojson }};
 
-// ==============================
-// PAGINATION SETUP
-// ==============================
-let currentPage = 1;
-const perPage = 10;
-
-function renderPage() {
-    const list = document.getElementById("tradeList");
-    const items = Array.from(list.children);
-
-    items.forEach((item, index) => {
-        const start = (currentPage - 1) * perPage;
-        const end = start + perPage;
-
-        item.style.display = (index >= start && index < end) ? "flex" : "none";
+    const profitChartCanvas = document.getElementById("profitChart");
+    new Chart(profitChartCanvas, {
+        type: "line",
+        data: {
+            labels: chartData.profit_over_time.labels,
+            datasets: [
+                {
+                    label: "Cumulative Profit",
+                    data: chartData.profit_over_time.values
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true
+        }
     });
 
-    document.getElementById("pageInfo").innerText =
-        `Page ${currentPage} / ${Math.ceil(items.length / perPage)}`;
-}
-
-function nextPage() {
-    const total = document.getElementById("tradeList").children.length;
-    if (currentPage * perPage < total) {
-        currentPage++;
-        renderPage();
-    }
-}
-
-function prevPage() {
-    if (currentPage > 1) {
-        currentPage--;
-        renderPage();
-    }
-}
-
-// Initial render
-renderPage();
-
-// ==============================
-// SEARCH
-// ==============================
-document.getElementById("search").addEventListener("input", function() {
-    const q = this.value.toLowerCase();
-
-    document.querySelectorAll(".trade").forEach(t => {
-        const item = t.dataset.item.toLowerCase();
-        t.style.display = item.includes(q) ? "flex" : "none";
+    const itemBreakdownCanvas = document.getElementById("itemBreakdownChart");
+    new Chart(itemBreakdownCanvas, {
+        type: "bar",
+        data: {
+            labels: chartData.item_breakdown.labels,
+            datasets: [
+                {
+                    label: "Total Quantity Traded",
+                    data: chartData.item_breakdown.values
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true
+        }
     });
-});
-
-// ==============================
-// SORT (FIXED)
-// ==============================
-document.getElementById("sort").addEventListener("change", function() {
-    const type = this.value;
-    const list = document.getElementById("tradeList");
-    const items = Array.from(list.children);
-
-    items.sort((a, b) => {
-        const pa = parseFloat(a.dataset.profit);
-        const pb = parseFloat(b.dataset.profit);
-        const ia = parseInt(a.dataset.index);
-        const ib = parseInt(b.dataset.index);
-
-        if (type === "profit") return pb - pa;
-        if (type === "loss") return pa - pb;
-
-        // NEWEST = reverse original order
-        if (type === "newest") return ib - ia;
-    });
-
-    items.forEach(i => list.appendChild(i));
-
-    // Reset pagination after sort
-    currentPage = 1;
-    renderPage();
-});
-
-// ==============================
-// CHART
-// ==============================
-const ctx = document.getElementById("profitChart");
-
-new Chart(ctx, {
-    type: "line",
-    data: {
-        labels: trades.map((_, i) => i + 1),
-        datasets: [{
-            label: "Profit Over Time",
-            data: trades.map(t => t.profit),
-        }]
-    }
-});
 </script>
-
 </body>
 </html>

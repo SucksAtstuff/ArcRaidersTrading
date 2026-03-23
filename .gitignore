@@ -1,2 +1,47 @@
+# =========================
+# Python cache / compiled
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# =========================
+# Virtual environments
+# =========================
+venv/
+.env/
+.venv/
+
+# =========================
+# PyCharm / IDE
+# =========================
+.idea/
+*.iml
+
+# =========================
+# Flask / local configs
+# =========================
+instance/
+.webassets-cache/
+
+# =========================
+# Logs & runtime files
+# =========================
+*.log
+
+# =========================
+# JSON / local data (your files)
+# =========================
 trades.json
 items_cache.json
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Environment variables
+# =========================
+.env
