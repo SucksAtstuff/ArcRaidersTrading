@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Add Trade</title>
+<style>
+body { background:#0f172a; color:white; font-family:Arial; padding:20px; }
+input { display:block; margin:5px 0; padding:8px; width:250px; }
+#suggestions { background:#1e293b; max-height:150px; overflow:auto; position:absolute; width:250px;}
+.suggestion { padding:5px; cursor:pointer;}
+.suggestion:hover { background:#334155;}
+#warning { color:red; }
+</style>
+</head>
+
+<body>
+
+<h1>Add Trade</h1>
+
+<form method="post">
+<input id="item" name="item" placeholder="Item" required>
+<div id="suggestions"></div>
+
+<input id="qty" name="quantity" placeholder="Quantity" required>
+<input id="price" name="price" placeholder="Your Price" required>
+<input id="avg" name="avg_price" placeholder="Avg 24h Price" required>
+<input id="seeds" name="seeds" placeholder="Seeds" required>
+
+<div id="warning"></div>
+
+<button>Save</button>
+</form>
+
+<script>
+const items = {{ items | tojson }};
+const input = document.getElementById("item");
+const box = document.getElementById("suggestions");
+
+let selected=null;
+
+input.addEventListener("input",()=>{
+    const q=input.value.toLowerCase();
+    box.innerHTML="";
+
+    if(!q) return;
+
+    items.filter(i=>i.name?.toLowerCase().includes(q)).slice(0,10)
+    .forEach(item=>{
+        const d=document.createElement("div");
+        d.textContent=item.name;
+        d.className="suggestion";
+
+        d.onclick=()=>{
+            input.value=item.name;
+            selected=item;
+            box.innerHTML="";
+        };
+
+        box.appendChild(d);
+    });
+});
+
+document.addEventListener("click",e=>{
+    if(e.target!==input) box.innerHTML="";
+});
+
+function check(){
+    const qty=+document.getElementById("qty").value;
+    const seeds=+document.getElementById("seeds").value;
+    const avg=+document.getElementById("avg").value;
+
+    const expected=avg*qty;
+
+    document.getElementById("warning").innerText =
+        seeds < expected*0.5 ? "⚠ BAD TRADE" : "";
+}
+
+document.getElementById("qty").oninput=check;
+document.getElementById("seeds").oninput=check;
+document.getElementById("avg").oninput=check;
+</script>
+
+</body>
+</html>
