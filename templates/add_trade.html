@@ -157,11 +157,9 @@
 
 <script>
     /*
-        Frontend autocomplete is now API-driven.
-        This replaces the old pattern:
-        const items = {{ items | tojson }};
-        which forced the server to ship the full item list to the browser.
+        Autocomplete now uses backend API instead of preloaded data.
     */
+
     const itemInput = document.getElementById("item");
     const suggestionsBox = document.getElementById("suggestions");
 
@@ -173,11 +171,6 @@
     let autocompleteAbortController = null;
 
     async function fetchSuggestions(query) {
-        /*
-            Abort the previous in-flight request if the user keeps typing.
-            This prevents race conditions where older requests finish later
-            and overwrite newer results.
-        */
         if (autocompleteAbortController) {
             autocompleteAbortController.abort();
         }
@@ -202,9 +195,7 @@
     function renderSuggestions(items) {
         clearSuggestions();
 
-        if (!items.length) {
-            return;
-        }
+        if (!items.length) return;
 
         for (const item of items) {
             const suggestion = document.createElement("div");
@@ -220,7 +211,12 @@
         }
     }
 
-    itemInput.addEventListener("input", async () => {
+    let debounceTimeout = null;
+
+    itemInput.addEventListener("input", () => {
+    clearTimeout(debounceTimeout);
+
+    debounceTimeout = setTimeout(async () => {
         const query = itemInput.value.trim();
 
         if (!query) {
@@ -232,14 +228,12 @@
             const items = await fetchSuggestions(query);
             renderSuggestions(items);
         } catch (error) {
-            /*
-                Ignore AbortError because that is expected when typing quickly.
-            */
             if (error.name !== "AbortError") {
                 clearSuggestions();
             }
         }
-    });
+    }, 200); // 200ms debounce
+});
 
     document.addEventListener("click", (event) => {
         if (event.target !== itemInput && !suggestionsBox.contains(event.target)) {
@@ -248,12 +242,6 @@
     });
 
     function updateBadTradeWarning() {
-        /*
-            Show a live warning before submit.
-
-            This does not replace server logic.
-            Server validation and calculation still remain the source of truth.
-        */
         const quantity = Number(quantityInput.value || 0);
         const avgPrice = Number(avgPriceInput.value || 0);
         const seeds = Number(seedsInput.value || 0);

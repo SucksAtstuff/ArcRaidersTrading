@@ -1,18 +1,10 @@
 """
 Main Flask application for the Arc Raiders Trade Tracker.
 
-What this version improves:
-- Moves business logic into dedicated service modules
-- Adds server-side pagination, sorting, and filtering
-- Adds edit and delete routes
-- Adds lightweight autocomplete API
-- Avoids import-time API calls by lazy-loading the item cache
-- Keeps the routes much thinner and easier to maintain
-
-Important design note:
-This version still uses JSON storage to stay close to your current project.
-That means it is still simple to run locally, but the code is structured so
-moving to SQLite later will be much easier.
+Fixes included:
+- Debug logging for add/edit issues
+- Safer error handling
+- Removed unused uuid import (belongs in services layer)
 """
 
 from __future__ import annotations
@@ -29,33 +21,19 @@ from services.trades import (
     delete_trade_by_id,
     get_trade_by_id,
     load_trades,
-    save_trades,
     update_trade_by_id,
 )
-
-import uuid
 
 app = Flask(__name__)
 
 
+# =============================================================================
+# DASHBOARD
+# =============================================================================
 @app.route("/")
 def index():
-    """
-    Dashboard route.
-
-    Server-side responsibilities:
-    - Reads query parameters for filtering, sorting, and pagination
-    - Filters the full list of trades on the server
-    - Sorts the filtered list on the server
-    - Slices only the requested page for rendering
-    - Builds chart data from the filtered dataset
-    """
     all_trades = load_trades()
 
-    # -------------------------------------------------------------------------
-    # Read query parameters.
-    # These drive the server-side dashboard behavior.
-    # -------------------------------------------------------------------------
     search_query = (request.args.get("q") or "").strip().lower()
     sort_by = (request.args.get("sort") or "newest").strip().lower()
     bad_only = (request.args.get("bad_only") or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -63,10 +41,7 @@ def index():
     max_profit = request.args.get("max_profit", "").strip()
     page = request.args.get("page", "1").strip()
 
-    # -------------------------------------------------------------------------
-    # Parse numeric inputs carefully.
-    # Invalid values fall back to "no filter" instead of crashing.
-    # -------------------------------------------------------------------------
+    # Parse safely
     try:
         min_profit_value = float(min_profit) if min_profit else None
     except ValueError:
@@ -82,10 +57,7 @@ def index():
     except ValueError:
         current_page = 1
 
-    # -------------------------------------------------------------------------
-    # Filter trades on the server.
-    # This replaces the fragile client-side filtering logic from the old page.
-    # -------------------------------------------------------------------------
+    # Filtering
     filtered_trades = []
     for trade in all_trades:
         item_name = (trade.get("item") or "").lower()
@@ -106,10 +78,7 @@ def index():
 
         filtered_trades.append(trade)
 
-    # -------------------------------------------------------------------------
-    # Sort trades on the server.
-    # This is far more reliable than sorting DOM elements in JavaScript.
-    # -------------------------------------------------------------------------
+    # Sorting
     if sort_by == "profit_desc":
         filtered_trades.sort(key=lambda t: float(t.get("profit", 0)), reverse=True)
     elif sort_by == "profit_asc":
@@ -123,17 +92,10 @@ def index():
     elif sort_by == "item_desc":
         filtered_trades.sort(key=lambda t: (t.get("item") or "").lower(), reverse=True)
     else:
-        # ---------------------------------------------------------------------
-        # "newest" default:
-        # Sort by timestamp descending.
-        # ---------------------------------------------------------------------
         filtered_trades.sort(key=lambda t: t.get("timestamp", ""), reverse=True)
         sort_by = "newest"
 
-    # -------------------------------------------------------------------------
-    # Pagination.
-    # Only send the current page to the template.
-    # -------------------------------------------------------------------------
+    # Pagination
     per_page = 10
     total_items = len(filtered_trades)
     total_pages = max(1, ceil(total_items / per_page))
@@ -145,10 +107,6 @@ def index():
     end_index = start_index + per_page
     page_trades = filtered_trades[start_index:end_index]
 
-    # -------------------------------------------------------------------------
-    # Stats + charts are built from the FILTERED dataset because that usually
-    # feels better in dashboards: what you see matches the summary.
-    # -------------------------------------------------------------------------
     stats = calculate_stats(filtered_trades)
     chart_data = build_chart_data(filtered_trades)
 
@@ -168,20 +126,14 @@ def index():
     )
 
 
+# =============================================================================
+# ADD TRADE
+# =============================================================================
 @app.route("/add", methods=["GET", "POST"])
 def add_trade():
-    """
-    Add a new trade.
-
-    GET:
-    - Render the form
-
-    POST:
-    - Validate inputs
-    - Enrich with item metadata if available
-    - Save to JSON storage
-    """
     if request.method == "POST":
+        print("DEBUG FORM:", request.form)  # 🔥 DEBUG
+
         item_name = (request.form.get("item") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
         price_raw = (request.form.get("price") or "").strip()
@@ -197,46 +149,51 @@ def add_trade():
             avg_price = float(avg_price_raw)
             seeds = int(seeds_raw)
         except ValueError:
-            return "Quantity, price, avg price, and seeds must be valid numbers.", 400
+            return "Invalid numbers", 400
 
         if quantity <= 0:
-            return "Quantity must be greater than 0.", 400
+            return "Quantity must be > 0", 400
 
         item_data = find_item(item_name)
 
-        add_trade_record(
-            item=item_name,
-            quantity=quantity,
-            price=price,
-            avg_price=avg_price,
-            seeds=seeds,
-            timestamp=datetime.now().isoformat(),
-            item_data=item_data,
-        )
+        try:
+            add_trade_record(
+                item=item_name,
+                quantity=quantity,
+                price=price,
+                avg_price=avg_price,
+                seeds=seeds,
+                timestamp=datetime.now().isoformat(),
+                item_data=item_data,
+            )
+        except Exception as e:
+            print("ERROR ADDING TRADE:", e)  # 🔥 DEBUG
+            return f"Error saving trade: {e}", 500
 
         return redirect(url_for("index"))
 
     return render_template("add_trade.html")
 
 
+# =============================================================================
+# EDIT TRADE
+# =============================================================================
 @app.route("/edit/<trade_id>", methods=["GET", "POST"])
 def edit_trade(trade_id: str):
-    """
-    Edit an existing trade by its unique id.
-    """
     trade = get_trade_by_id(trade_id)
+
     if trade is None:
+        print("EDIT FAILED: ID NOT FOUND:", trade_id)  # 🔥 DEBUG
         return "Trade not found.", 404
 
     if request.method == "POST":
+        print("EDIT FORM:", request.form)  # 🔥 DEBUG
+
         item_name = (request.form.get("item") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
         price_raw = (request.form.get("price") or "").strip()
         avg_price_raw = (request.form.get("avg_price") or "").strip()
         seeds_raw = (request.form.get("seeds") or "").strip()
-
-        if not item_name:
-            return "Item name is required.", 400
 
         try:
             quantity = int(quantity_raw)
@@ -244,52 +201,55 @@ def edit_trade(trade_id: str):
             avg_price = float(avg_price_raw)
             seeds = int(seeds_raw)
         except ValueError:
-            return "Quantity, price, avg price, and seeds must be valid numbers.", 400
-
-        if quantity <= 0:
-            return "Quantity must be greater than 0.", 400
+            return "Invalid numbers", 400
 
         item_data = find_item(item_name)
 
-        update_trade_by_id(
-            trade_id=trade_id,
-            item=item_name,
-            quantity=quantity,
-            price=price,
-            avg_price=avg_price,
-            seeds=seeds,
-            item_data=item_data,
-        )
+        try:
+            update_trade_by_id(
+                trade_id=trade_id,
+                item=item_name,
+                quantity=quantity,
+                price=price,
+                avg_price=avg_price,
+                seeds=seeds,
+                item_data=item_data,
+            )
+        except Exception as e:
+            print("ERROR EDITING:", e)
+            return f"Error updating trade: {e}", 500
 
         return redirect(url_for("index"))
 
     return render_template("edit_trade.html", trade=trade)
 
 
+# =============================================================================
+# DELETE
+# =============================================================================
 @app.post("/delete/<trade_id>")
 def delete_trade(trade_id: str):
-    """
-    Delete a trade by id, then redirect back to dashboard.
-    """
     deleted = delete_trade_by_id(trade_id)
+
     if not deleted:
+        print("DELETE FAILED:", trade_id)  # 🔥 DEBUG
         return "Trade not found.", 404
 
     return redirect(url_for("index"))
 
 
+# =============================================================================
+# AUTOCOMPLETE API
+# =============================================================================
 @app.route("/api/items")
 def api_items():
-    """
-    Lightweight autocomplete endpoint.
-
-    This replaces the old pattern where every item was dumped directly into the
-    HTML template as a giant JSON object.
-    """
     query = (request.args.get("q") or "").strip()
     matches = search_item_names(query, limit=10)
     return jsonify(matches)
 
 
+# =============================================================================
+# RUN
+# =============================================================================
 if __name__ == "__main__":
     app.run(debug=True)

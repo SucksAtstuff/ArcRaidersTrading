@@ -1,84 +1,50 @@
 """
-Item-related services.
+Item caching + lookup logic.
 
-Responsibilities:
-- Fetch and cache item metadata from the Metaforge API
-- Provide lazy access to the cached item list
-- Search item names for autocomplete
-- Find a specific item by case-insensitive name match
+This version includes:
+- in-memory cache
+- disk cache
+- stale fallback if API fails
+- fast O(1) lookup for find_item
 """
 
 from __future__ import annotations
 
 import json
-import logging
 import os
 import time
-from typing import Any
-
 import requests
 
 API_URL = "https://metaforge.app/api/arc-raiders/items"
 CACHE_FILE = "items_cache.json"
-HTTP_TIMEOUT = (3, 10)
-CACHE_TTL_SECONDS = 6 * 60 * 60
+CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 hours
 
-logger = logging.getLogger(__name__)
+# -----------------------------------------------------------------------------
+# Global caches
+# -----------------------------------------------------------------------------
+_ITEM_CACHE = None           # full list
+_ITEM_LOOKUP = {}            # name -> item dict
 
-_ITEM_CACHE: list[dict[str, Any]] | None = None
 
+# -----------------------------------------------------------------------------
+# Safe file write (prevents corruption)
+# -----------------------------------------------------------------------------
+def _atomic_write_json(path, data):
+    temp_path = path + ".tmp"
 
-def _atomic_write_json(path: str, data: Any) -> None:
-    """
-    Safely write JSON to disk using a temporary file then atomic replace.
-
-    Why:
-    - Prevents partially-written files if the process stops mid-write
-    - Reduces risk of corrupt cache files
-    """
-    temp_path = f"{path}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as file_handle:
-        json.dump(data, file_handle, indent=2)
-        file_handle.flush()
-        os.fsync(file_handle.fileno())
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
 
     os.replace(temp_path, path)
 
 
-def _load_cache_from_disk_if_fresh() -> list[dict[str, Any]] | None:
-    """
-    Return cached items if the cache file exists and is still fresh enough.
-    """
-    if not os.path.exists(CACHE_FILE):
-        return None
-
-    try:
-        cache_age_seconds = time.time() - os.path.getmtime(CACHE_FILE)
-        if cache_age_seconds > CACHE_TTL_SECONDS:
-            return None
-
-        with open(CACHE_FILE, "r", encoding="utf-8") as file_handle:
-            data = json.load(file_handle)
-
-        if isinstance(data, list):
-            return data
-
-        return None
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to read items cache: %s", exc)
-        return None
-
-
-def _fetch_items_from_api() -> list[dict[str, Any]]:
-    """
-    Fetch all items from the external API using pagination.
-
-    Notes:
-    - Uses request timeout so the app doesn't hang forever
-    - Stops gracefully on request failure
-    - Returns a list even if partially fetched
-    """
-    all_items: list[dict[str, Any]] = []
+# -----------------------------------------------------------------------------
+# Fetch from API (paginated)
+# -----------------------------------------------------------------------------
+def _fetch_items_from_api():
+    all_items = []
     page = 1
     limit = 100
 
@@ -86,22 +52,20 @@ def _fetch_items_from_api() -> list[dict[str, Any]]:
         url = f"{API_URL}?page={page}&limit={limit}"
 
         try:
-            response = requests.get(url, timeout=HTTP_TIMEOUT)
+            response = requests.get(url, timeout=(3, 10))
             response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
-            logger.error("Failed to fetch items from API on page %s: %s", page, exc)
+        except requests.exceptions.RequestException:
             break
 
-        payload = response.json()
-        items = payload.get("data", [])
+        data = response.json()
+        items = data.get("data", [])
 
         if not items:
             break
 
         all_items.extend(items)
 
-        has_next_page = payload.get("pagination", {}).get("hasNextPage", False)
-        if not has_next_page:
+        if not data.get("pagination", {}).get("hasNextPage", False):
             break
 
         page += 1
@@ -109,72 +73,104 @@ def _fetch_items_from_api() -> list[dict[str, Any]]:
     return all_items
 
 
-def get_item_cache() -> list[dict[str, Any]]:
-    """
-    Lazy-load the item cache.
+# -----------------------------------------------------------------------------
+# MAIN CACHE FUNCTION (THIS IS THE IMPORTANT ONE)
+# -----------------------------------------------------------------------------
+def get_item_cache():
+    global _ITEM_CACHE, _ITEM_LOOKUP
 
-    Load order:
-    1. In-memory cache if already loaded
-    2. Fresh disk cache if available
-    3. API fetch, then save to disk
-    """
-    global _ITEM_CACHE
-
+    # -------------------------------------------------------------------------
+    # 1. Return in-memory cache if already loaded
+    # -------------------------------------------------------------------------
     if _ITEM_CACHE is not None:
         return _ITEM_CACHE
 
-    disk_cache = _load_cache_from_disk_if_fresh()
-    if disk_cache is not None:
-        _ITEM_CACHE = disk_cache
-        return _ITEM_CACHE
+    disk_cache = None
 
+    # -------------------------------------------------------------------------
+    # 2. Try reading disk cache (even if stale)
+    # -------------------------------------------------------------------------
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                disk_cache = json.load(f)
+        except:
+            disk_cache = None
+
+    # -------------------------------------------------------------------------
+    # 3. If cache exists AND is fresh → use it
+    # -------------------------------------------------------------------------
+    if disk_cache:
+        age = time.time() - os.path.getmtime(CACHE_FILE)
+
+        if age < CACHE_TTL_SECONDS:
+            _ITEM_CACHE = disk_cache
+
+            # Build fast lookup table
+            _ITEM_LOOKUP = {
+                (item.get("name") or "").lower(): item
+                for item in _ITEM_CACHE
+            }
+
+            return _ITEM_CACHE
+
+    # -------------------------------------------------------------------------
+    # 4. Try fetching fresh data from API
+    # -------------------------------------------------------------------------
     api_items = _fetch_items_from_api()
-    _ITEM_CACHE = api_items
 
     if api_items:
-        try:
-            _atomic_write_json(CACHE_FILE, api_items)
-        except OSError as exc:
-            logger.warning("Failed to write items cache: %s", exc)
+        _ITEM_CACHE = api_items
 
+        # Save to disk
+        _atomic_write_json(CACHE_FILE, api_items)
+
+        # Build lookup
+        _ITEM_LOOKUP = {
+            (item.get("name") or "").lower(): item
+            for item in _ITEM_CACHE
+        }
+
+        return _ITEM_CACHE
+
+    # -------------------------------------------------------------------------
+    # 5. 🔥 FALLBACK: use stale cache if API failed
+    # -------------------------------------------------------------------------
+    if disk_cache:
+        _ITEM_CACHE = disk_cache
+
+        _ITEM_LOOKUP = {
+            (item.get("name") or "").lower(): item
+            for item in _ITEM_CACHE
+        }
+
+        return _ITEM_CACHE
+
+    # -------------------------------------------------------------------------
+    # 6. Last resort: empty list
+    # -------------------------------------------------------------------------
+    _ITEM_CACHE = []
+    _ITEM_LOOKUP = {}
     return _ITEM_CACHE
 
 
-def find_item(name: str) -> dict[str, Any] | None:
+# -----------------------------------------------------------------------------
+# FAST ITEM LOOKUP (O(1))
+# -----------------------------------------------------------------------------
+def find_item(name: str):
     """
-    Find one item by exact case-insensitive name.
+    Find an item instantly using cached lookup.
+
+    This avoids scanning the full list every time.
     """
+
     if not name:
         return None
 
+    # Ensure cache is loaded
+    if _ITEM_CACHE is None:
+        get_item_cache()
+
     normalized_name = name.strip().lower()
-    for item in get_item_cache():
-        if (item.get("name") or "").strip().lower() == normalized_name:
-            return item
 
-    return None
-
-
-def search_item_names(query: str, limit: int = 10) -> list[dict[str, str]]:
-    """
-    Return minimal autocomplete results.
-
-    Each result is intentionally tiny:
-    - name only
-
-    That keeps the frontend response small and fast.
-    """
-    normalized_query = query.strip().lower()
-    if not normalized_query:
-        return []
-
-    results: list[dict[str, str]] = []
-    for item in get_item_cache():
-        item_name = (item.get("name") or "").strip()
-        if normalized_query in item_name.lower():
-            results.append({"name": item_name})
-
-        if len(results) >= limit:
-            break
-
-    return results
+    return _ITEM_LOOKUP.get(normalized_name)
