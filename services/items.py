@@ -14,6 +14,7 @@ import json
 import os
 import time
 import requests
+import threading
 
 API_URL = "https://metaforge.app/api/arc-raiders/items"
 CACHE_FILE = "items_cache.json"
@@ -104,16 +105,19 @@ def get_item_cache():
     if disk_cache:
         age = time.time() - os.path.getmtime(CACHE_FILE)
 
-        if age < CACHE_TTL_SECONDS:
-            _ITEM_CACHE = disk_cache
+        # Always load cache immediately (fast UI)
+        _ITEM_CACHE = disk_cache
 
-            # Build fast lookup table
-            _ITEM_LOOKUP = {
-                (item.get("name") or "").lower(): item
-                for item in _ITEM_CACHE
-            }
+        _ITEM_LOOKUP = {
+            (item.get("name") or "").lower(): item
+            for item in _ITEM_CACHE
+        }
 
-            return _ITEM_CACHE
+        # 🔥 If stale → refresh in background instead of blocking
+        if age > CACHE_TTL_SECONDS:
+            refresh_items_background()
+
+        return _ITEM_CACHE
 
     # -------------------------------------------------------------------------
     # 4. Try fetching fresh data from API
@@ -205,3 +209,40 @@ def search_item_names(query: str, limit: int = 10):
     _SEARCH_CACHE[normalized_query] = results
 
     return results
+
+def refresh_items_background():
+    """
+    Refresh item cache in a background thread.
+
+    This prevents UI freezing when:
+    - API is slow
+    - cache expires
+
+    The app continues using old cache while updating.
+    """
+
+    def _refresh():
+        global _ITEM_CACHE, _ITEM_LOOKUP
+
+        try:
+            print("🔄 Background item refresh started...")
+
+            items = _fetch_items_from_api()
+
+            if items:
+                _ITEM_CACHE = items
+
+                _atomic_write_json(CACHE_FILE, items)
+
+                _ITEM_LOOKUP = {
+                    (item.get("name") or "").lower(): item
+                    for item in items
+                }
+
+                print("✅ Item cache updated in background")
+
+        except Exception as e:
+            print("⚠ Background refresh failed:", e)
+
+    # Run in separate thread (non-blocking)
+    threading.Thread(target=_refresh, daemon=True).start()

@@ -20,9 +20,20 @@ def get_connection():
 # INIT DATABASE (AUTO CREATE TABLE)
 # -----------------------------------------------------------------------------
 def init_db():
+    """
+    Initialize database and create indexes for fast queries.
+
+    Indexes dramatically improve:
+    - sorting (timestamp, seeds, profit)
+    - filtering (item searches)
+    """
+
     conn = get_connection()
     cursor = conn.cursor()
 
+    # -------------------------------------------------------------------------
+    # TABLE
+    # -------------------------------------------------------------------------
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS trades (
         id TEXT PRIMARY KEY,
@@ -39,6 +50,22 @@ def init_db():
         profit REAL
     )
     """)
+
+    # -------------------------------------------------------------------------
+    # 🔥 INDEXES (THIS IS THE BIG WIN)
+    # -------------------------------------------------------------------------
+
+    # Fast sorting by time
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON trades(timestamp DESC)")
+
+    # Fast sorting/filtering by seeds
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_seeds ON trades(seeds)")
+
+    # Fast sorting/filtering by profit
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_profit ON trades(profit)")
+
+    # Fast search by item name
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_item ON trades(item)")
 
     conn.commit()
     conn.close()
